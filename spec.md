@@ -32,7 +32,7 @@ Software web para un propietario de inmuebles (todos ubicados en la **provincia 
   - Alternativa evaluada: Turso (SQLite distribuida) — liviana y con buen soporte para Next.js, válida si el volumen de datos se mantiene chico.
   - Descartadas: MongoDB Atlas M0 (también pausa por inactividad, cada 30 días, con reactivación manual) y PlanetScale (ya no tiene plan gratuito).
 - **ORM sugerido**: Drizzle o Prisma. Drizzle tiene mejor soporte para el driver serverless de Neon.
-- **Storage de archivos**: Vercel Blob, para el contrato en PDF de cada propiedad (§4). Se descartó guardar el archivo en Postgres/Neon por el límite de storage del free tier (0.5 GB por proyecto).
+- **Storage de archivos**: Vercel Blob, para el PDF del contrato adjunto a cada propiedad. Plan Hobby gratuito: 1 GB de storage y 10 GB de transferencia por mes (suficiente para este caso de uso). Nota: el plan Hobby es para uso personal/no comercial — está bien mientras la app en sí no se venda ni se monetice.
 
 ---
 
@@ -66,18 +66,15 @@ Software web para un propietario de inmuebles (todos ubicados en la **provincia 
 - monto
 - vigente_desde (fecha)
 
-> Necesaria porque `Propiedad.monto actual del alquiler` es un valor único (el vigente), pero `Pago.monto correspondiente` (más abajo) requiere saber cuánto correspondía en cualquier período pasado, y §5.7 exige poder recalcular la deuda acumulada retroactivamente al editar/eliminar un pago viejo. Cada aumento por IPC (§5.1) inserta un registro nuevo acá en lugar de solo pisar el monto en `Propiedad`. El monto inicial del contrato es el primer registro (vigente_desde = fecha de inicio del contrato).
+> Necesaria para poder recalcular correctamente la deuda de meses pasados: sin este historial, cualquier recálculo usaría el monto actual (con aumentos de IPC ya aplicados) en vez del monto que realmente estaba vigente en ese mes.
 
-### Impuesto (asociado a una propiedad)
+### Impuesto (catálogo de impuestos de una propiedad — NO tiene monto ni estado)
 - id
 - propiedad_id
 - tipo (ABL, expensas, tasas municipales, etc.)
-- monto
 - periodicidad (mensual, bimestral, etc.)
-- estado (pagado / pendiente)
-- **no admite recargo por mora**
 
-> Nota de flujo: el inquilino le informa el monto del impuesto a quien cobra los alquileres, y esa persona (el propietario) es quien va y lo paga. El sistema solo necesita registrar el monto y si ya se pagó, no modelar ese intercambio.
+> El monto de un impuesto varía mes a mes (por consumo o por indexación), igual que pasa con el alquiler. Por eso `impuestos` es solo el catálogo de qué impuestos tiene la propiedad — el monto real, la fecha de vencimiento y si se pagó viven en `Pago`, igual que con el alquiler. Es el mismo principio que separar `Propiedad` de `AjusteAlquiler`: la definición no se mezcla con el historial de instancias en el tiempo.
 
 ### Gasto (asociado a una propiedad, a cargo del propietario)
 - id
@@ -89,14 +86,16 @@ Software web para un propietario de inmuebles (todos ubicados en la **provincia 
 
 > A diferencia del impuesto, el gasto es siempre a cargo del propietario, no tiene ninguna relación con el inquilino. Impacta directamente en el cálculo de rentabilidad neta.
 
-### Pago / Movimiento (histórico mensual)
+### Pago / Movimiento (histórico mensual — libro mayor único de alquiler e impuestos)
 - id
 - propiedad_id
 - tipo (alquiler / impuesto)
+- impuesto_id (FK a Impuesto, null si tipo = alquiler)
 - período (mes/año que corresponde)
 - monto correspondiente (lo que debía pagarse ese mes)
+- fecha de vencimiento
 - monto pagado
-- fecha de pago (si se pagó)
+- fecha de pago (si se pagó — null significa pendiente)
 - diferencia → si es negativa, pasa a deuda
 - recargo aplicado (solo si tipo = alquiler y hay atraso)
 - método de pago (efectivo / transferencia) — solo aplica a pagos del inquilino (alquiler e impuestos), no a los gastos del propietario
@@ -114,14 +113,14 @@ Software web para un propietario de inmuebles (todos ubicados en la **provincia 
 ### 5.2 Deuda de alquiler
 - Si el inquilino paga menos del monto correspondiente (o no paga), la diferencia se acumula como deuda para el mes siguiente.
 - El recargo por mora es **interés simple**: se aplica solo sobre la deuda adeudada, no sobre recargos previos (no es interés compuesto).
-- **Abierto:** la tasa/porcentaje exacto del recargo y su periodicidad (¿mensual? ¿por día de atraso?) todavía no están definidos. Hasta que se definan, el sistema debe tratar la tasa como un parámetro configurable (no hardcodeado), para no bloquear el resto del modelo de datos ni de los cálculos que no dependen del valor exacto.
+- La **tasa de mora** queda como parámetro configurable (no hardcodeado), sin un valor por defecto definido todavía — hay que decidir el número antes de poder calcular montos reales.
 - Si el inquilino hace un **pago parcial**, se imputa primero a la **deuda vieja** y lo que sobra al mes corriente.
 
 ### 5.3 Impuestos
-- Se cargan por separado del alquiler, con su propio monto y periodicidad.
+- `Impuesto` es solo el catálogo (qué impuestos tiene la propiedad y su periodicidad). El monto real, la fecha de vencimiento y el estado pagado/pendiente viven en `Pago`, porque el monto varía mes a mes.
 - No generan recargo por mora.
-- Quedan registrados como "pendientes" hasta que el propietario los marca como pagados, para tener trazabilidad.
-- No hay una API pública para obtener estos montos automáticamente (ver sección 6.1) — la carga es manual.
+- El estado "pendiente" se deriva de que `fecha_pago` esté vacía en el `Pago` correspondiente — no es una columna aparte a mantener sincronizada.
+- No hay una API pública para obtener estos montos automáticamente (ver sección 6.2) — la carga es manual: el inquilino informa el monto y el propietario lo paga.
 
 ### 5.4 Gastos
 - Se registran por propiedad, con categoría fija (reparación / mantenimiento / mejora / otro), monto y fecha.
@@ -190,4 +189,4 @@ Automatizarlo requeriría scraping con las credenciales del propietario, lo cual
 
 1. ¿Qué hace el sistema si el IPC del mes exacto todavía no fue publicado por INDEC? (¿mostrar el último valor disponible como "provisorio"?)
 2. ¿Cuál de las APIs de IPC (ArgentinaDatos o Argly) tiene el desagregado de "Alquiler de vivienda" y no solo el índice general? Hay que confirmarlo antes de integrar.
-3. ¿Cuál es la tasa exacta del recargo por mora y su periodicidad (mensual / diaria)? Ver §5.2. Mientras no se defina, el sistema la trata como parámetro configurable, no como valor fijo en el código.
+3. ¿Cuál es el valor de la tasa de mora? Queda modelada como parámetro configurable, pero todavía no tiene un número definido.
