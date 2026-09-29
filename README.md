@@ -35,3 +35,34 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 # GestionAlquileres
+
+## Crear el usuario propietario
+
+La aplicación no tiene registro público: el único usuario con cuenta es el propietario, y se
+crea desde la línea de comandos.
+
+```bash
+npx tsx --env-file=.env.local scripts/create-user.ts
+```
+
+> Si tus variables están en `.env` en lugar de `.env.local`, usá `--env-file=.env`. El script
+> también toma `DATABASE_URL` del entorno del sistema si ya está definida.
+
+El script pide los datos de forma interactiva:
+
+1. **Email** — se normaliza a minúsculas.
+2. **Nombre** — solo se pide cuando el usuario no existe todavía.
+3. **Contraseña** (mínimo 8 caracteres) y su confirmación — no se muestran al tipear, así no
+   quedan en pantalla, en el scrollback ni en el historial de la shell.
+
+Nunca pases la contraseña como argumento: quedaría visible en el historial y en la lista de
+procesos del sistema.
+
+El comportamiento es **upsert por email**:
+
+- Si el email **no existe**, crea el usuario.
+- Si el email **ya existe**, actualiza únicamente su `password_hash` — este es el camino para
+  resetear la contraseña.
+
+La contraseña se guarda hasheada con `bcryptjs` (12 rondas). El script confirma al terminar si
+creó o actualizó el usuario, sin imprimir nunca la contraseña ni el hash.
