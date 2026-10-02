@@ -2,8 +2,10 @@
 
 import { eq } from 'drizzle-orm'
 import { compare } from 'bcryptjs'
+import { redirect } from 'next/navigation'
 import { db } from '@/db'
 import { usuarios } from '@/db/schema'
+import { createSessionToken, createSessionCookie } from '@/lib/session'
 
 export type LoginState = {
   success: boolean
@@ -48,8 +50,13 @@ export async function loginAction(
     return { success: false, error: INVALID_CREDENTIALS_MSG }
   }
 
-  // Credentials valid — ready for future session handling
-  // TODO: Create session / set auth cookie here (Issue #XX)
-  return { success: true, error: '' }
+  // Credentials valid — create session and redirect
+  const token = await createSessionToken({
+    userId: user.id,
+    email: user.email,
+  })
+  await createSessionCookie(token)
+
+  redirect('/dashboard')
 }
 

@@ -61,15 +61,6 @@ export default function LoginForm() {
         </p>
       )}
 
-      {/* Success message (temporary, until session handling is implemented) */}
-      {state.success && (
-        <p
-          aria-live="polite"
-          className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2"
-        >
-          Inicio de sesión exitoso
-        </p>
-      )}
 
       {/* Submit button */}
       <button
