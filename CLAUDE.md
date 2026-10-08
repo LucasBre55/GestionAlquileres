@@ -8,22 +8,32 @@ Software de gestión de alquileres para un propietario en Córdoba, Argentina: a
 
 ## Stack técnico confirmado
 
-- **Framework:** Next.js 16.3.4 (App Router), React 19.2.8, TypeScript 5 (strict).
+- **Framework:** Next.js 16.4.0 (App Router), React 19.2.8, TypeScript 5 (strict).
   - ⚠️ Next 16 puede tener breaking changes vs. conocimiento previo del modelo — ver `AGENTS.md` en la raíz: leer `node_modules/next/dist/docs/` antes de escribir código nuevo relacionado a Next.
+  - En Next 16 `middleware` pasó a llamarse `proxy`: la protección de rutas vive en `src/proxy.ts`.
 - **Estilos:** Tailwind CSS 4 (vía `@tailwindcss/postcss`), sin librería de componentes.
-- **Base de datos:** PostgreSQL gestionado por Neon (`@neondatabase/serverless`, driver HTTP).
-- **ORM:** Drizzle ORM 0.45 + drizzle-kit 0.31 — **instalados pero sin usar todavía** (no hay schema, ni `drizzle.config.ts`, ni migraciones).
-- **Storage de archivos:** Vercel Blob (spec §3) — para el contrato en PDF de cada propiedad. Sin instalar/configurar todavía.
-- **Auth:** ninguna todavía.
-- **Testing:** ninguno instalado todavía.
+- **Base de datos:** PostgreSQL 16 gestionado por Neon (`@neondatabase/serverless`, driver HTTP).
+- **ORM:** Drizzle ORM 0.45 + drizzle-kit 0.31. Schema en `src/db/schema.ts`, migraciones en `drizzle/`, config en `drizzle.config.ts`.
+- **Storage de archivos:** Vercel Blob (spec §3), modo privado, para el contrato en PDF de cada propiedad. Helpers en `src/lib/blob.ts` (todavía sin uso desde la UI).
+- **Auth:** propia, sin librería de auth. Password con `bcryptjs` (12 rondas), sesión como JWT HS256 firmado con `jose` (`JWT_SECRET`) en cookie `session`.
+- **Testing:** Vitest 5. Los tests de integración usan un Postgres 16 local vía `docker-compose.test.yml` (`pg` + `drizzle-orm/node-postgres`), nunca Neon.
 
-## Estado actual (2026-09-06)
+## Estado actual (2026-10-08)
 
-El repo es, en la práctica, el scaffold de `create-next-app` sin modificar + 2 dependencias agregadas (`drizzle-orm`, `@neondatabase/serverless`) + `src/db/index.ts` (conexión a Neon). No hay:
-- Modelo de datos (Usuario, Propiedad, Impuesto, Gasto, Pago) — cero tablas definidas.
-- Lógica de negocio (IPC, mora, rentabilidad neta) — cero funciones.
-- Auth, ABMs, dashboard — cero UI/rutas propias más allá de la landing default.
-- `drizzle.config.ts`, carpeta `migrations/`, `.env.example`.
+Hecho:
+- **Modelo de datos** (#4, #5): las 6 tablas (`usuarios`, `propiedades`, `ajustes_alquiler`, `impuestos`, `gastos`, `pagos`) con su migración inicial. Seed de datos de prueba en `src/db/seed.ts` (`npm run seed`).
+- **Autenticación** (épica #8, #9–#13):
+  - Creación del propietario por CLI: `scripts/create-user.ts` (upsert por email, documentado en el README).
+  - Login: `src/app/login/page.tsx` + `src/components/LoginForm.tsx` → server action `loginAction` en `src/app/actions/auth.ts`, con error genérico "Credenciales inválidas".
+  - Sesión: `src/lib/session.ts`. JWT de 7 días, cookie `httpOnly`, `sameSite: 'strict'`, `secure` solo en producción.
+  - Protección de rutas: `src/proxy.ts`. Solo `/login` es pública. Excluye `api`, `_next/static`, `_next/image` y los archivos de metadata.
+  - Logout: `src/app/actions/logout.ts`. Solo borra la cookie (sesión stateless, sin invalidación del lado del servidor).
+- **Testing** (épica #14, #15–#17): Vitest, Postgres de test en Docker y reseteo con `TRUNCATE` entre tests (`src/test/`).
+
+Pendiente:
+- Lógica de negocio (IPC, mora, rentabilidad neta): cero funciones.
+- ABMs y dashboard real: `/dashboard` es un placeholder, y `/` sigue siendo la landing de `create-next-app`.
+- Deuda técnica abierta: #29 (esbuild vulnerable vía drizzle-kit), #32 (separar tests unit/integration).
 
 ## Convenciones del proyecto
 
@@ -42,16 +52,19 @@ npm run dev      # servidor de desarrollo (Next.js, puerto 3000)
 npm run build    # build de producción
 npm run start    # servidor de producción
 npm run lint     # eslint
+npm run seed     # carga datos de prueba (contra DATABASE_URL)
+npm run test     # vitest en modo watch
+npm run test:run # vitest una sola vez (requiere el contenedor de docker-compose.test.yml levantado)
+npm run verify   # tsc --noEmit + eslint + vitest run
 ```
 
-No hay comandos de migración todavía porque no existe `drizzle.config.ts`. Una vez creado, lo esperable es:
+Migraciones:
 ```bash
 npx drizzle-kit generate   # genera migración a partir del schema
 npx drizzle-kit migrate    # aplica migraciones contra DATABASE_URL
 npx drizzle-kit studio     # explorador visual de la DB
 ```
-No hay `.env.example` — falta documentar qué variables de entorno requiere la app (mínimo `DATABASE_URL`).
-No hay test runner instalado — no hay comando de tests todavía.
+Variables de entorno documentadas en `.env.example`. ⚠️ `JWT_SECRET` (obligatoria para login y `src/proxy.ts`) todavía no figura ahí.
 
 ## Roadmap priorizado hacia el MVP
 
