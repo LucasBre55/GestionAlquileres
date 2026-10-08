@@ -1,0 +1,20 @@
+# Disposable local Postgres for tests. Not for development or production data.
+# Major version matches Neon (Postgres 16).
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: gestion_alquileres_test
+    ports:
+      # Host 5433 avoids clashing with a local Postgres on the default 5432.
+      - "5433:5432"
+    # Data lives in memory only: every container restart starts from an empty database.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d gestion_alquileres_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
