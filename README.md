@@ -66,3 +66,28 @@ El comportamiento es **upsert por email**:
 
 La contraseña se guarda hasheada con `bcryptjs` (12 rondas). El script confirma al terminar si
 creó o actualizó el usuario, sin imprimir nunca la contraseña ni el hash.
+
+## Base de datos para tests
+
+Los tests usan un Postgres 16 local y descartable (misma versión major que Neon), definido en
+`docker-compose.test.yml`. Escucha en el puerto **5433** del host para no chocar con un
+Postgres local en el 5432, y guarda los datos en `tmpfs`: al reiniciar el contenedor la base
+arranca vacía.
+
+Levantarla:
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+```
+
+Verificar que esté lista (el estado debe ser `healthy`, no solo `running`):
+
+```bash
+docker compose -f docker-compose.test.yml ps
+```
+
+Pararla:
+
+```bash
+docker compose -f docker-compose.test.yml down
+```
