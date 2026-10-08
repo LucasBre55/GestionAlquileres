@@ -91,3 +91,26 @@ Pararla:
 ```bash
 docker compose -f docker-compose.test.yml down
 ```
+
+## Tests de integración
+
+Los tests de integración usan la base de `docker-compose.test.yml` a través de
+`DATABASE_URL_TEST` (copiala de `.env.example` a tu `.env.local`). Nunca usan `DATABASE_URL`:
+`src/db/test-client.ts` rechaza cualquier host que no sea local.
+
+1. Levantá el contenedor:
+
+   ```bash
+   docker compose -f docker-compose.test.yml up -d
+   ```
+
+2. Corré los tests:
+
+   ```bash
+   npm run test:run
+   ```
+
+Antes de la corrida, `src/test/global-setup.ts` aplica las migraciones de `drizzle/` una sola
+vez. Después de cada test, `src/test/setup-db.ts` trunca todas las tablas del schema con
+`RESTART IDENTITY CASCADE`, así cada test arranca con la base vacía. Los archivos de test corren
+en serie (`fileParallelism: false`) porque comparten la misma base.
