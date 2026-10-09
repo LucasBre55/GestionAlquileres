@@ -15,6 +15,13 @@
       "when": 1791512195650,
       "tag": "0001_intentos_login",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791514770823,
+      "tag": "0002_sesiones",
+      "breakpoints": true
     }
   ]
 }

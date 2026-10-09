@@ -8,6 +8,7 @@ import {
   serial,
   text,
   timestamp,
+  uuid,
 } from 'drizzle-orm/pg-core';
 
 export const estadoPropiedadEnum = pgEnum('estado_propiedad', ['activa', 'inactiva']);
@@ -25,6 +26,23 @@ export const usuarios = pgTable('usuarios', {
   nombre: text('nombre').notNull(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
+});
+
+// Sesiones activas, fuente de verdad adicional al JWT para poder invalidarlas antes
+// de que expiren (logout, reseteo de contraseña). `token_hash` es el SHA-256 del
+// identificador de sesión: el identificador sin hashear solo viaja dentro del JWT.
+// A diferencia de propiedades -> usuarios (restrict), una sesión no tiene sentido
+// sin su usuario, por eso cascade.
+// Mejora futura: no hay limpieza automática de sesiones expiradas o revocadas.
+export const sesiones = pgTable('sesiones', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  usuarioId: integer('usuario_id')
+    .notNull()
+    .references(() => usuarios.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
 });
 
 // Intentos fallidos de login, para el rate limiting (ver src/lib/rate-limit.ts).
