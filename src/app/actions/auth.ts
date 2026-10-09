@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { db } from '@/db'
 import { usuarios } from '@/db/schema'
 import { createSessionToken, createSessionCookie } from '@/lib/session'
+import { getSafeRedirectPath } from '@/lib/safe-redirect'
 
 export type LoginState = {
   success: boolean
@@ -60,5 +61,6 @@ export async function loginAction(
   })
   await createSessionCookie(token)
 
-  redirect('/dashboard')
+  // `from` viene del cliente: solo se acepta si es una ruta interna
+  redirect(getSafeRedirectPath(formData.get('from')) ?? '/dashboard')
 }
