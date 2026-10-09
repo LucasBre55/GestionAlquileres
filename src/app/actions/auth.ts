@@ -18,18 +18,21 @@ export async function loginAction(
   _prevState: LoginState,
   formData: FormData
 ): Promise<LoginState> {
-  const email = formData.get('email')
+  const rawEmail = formData.get('email')
   const password = formData.get('password')
 
   // Basic input presence check — same generic error for everything
   if (
-    typeof email !== 'string' ||
+    typeof rawEmail !== 'string' ||
     typeof password !== 'string' ||
-    !email ||
+    !rawEmail ||
     !password
   ) {
     return { success: false, error: INVALID_CREDENTIALS_MSG }
   }
+
+  // Same normalization as scripts/create-user.ts, which stores emails lowercased
+  const email = rawEmail.trim().toLowerCase()
 
   // Look up user by email via Drizzle ORM
   const [user] = await db
