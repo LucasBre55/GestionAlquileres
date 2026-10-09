@@ -39,12 +39,13 @@ export const config = {
   matcher: [
     /*
      * Ejecutar el proxy en todas las rutas EXCEPTO:
-     * - api (rutas API)
+     * - api y api/* (rutas API; no excluye prefijos como /apiario)
      * - _next/static (archivos estáticos)
      * - _next/image (optimización de imágenes)
      * - favicon.ico, sitemap.xml, robots.txt (archivos de metadatos)
+     * - imágenes servidas desde public/ (svg, png, jpg, jpeg, gif, webp, ico)
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
+    '/((?!api(?:/|$)|_next/static|_next/image|favicon\\.ico$|sitemap\\.xml$|robots\\.txt$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }
 
