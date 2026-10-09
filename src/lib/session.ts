@@ -1,8 +1,9 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 
+import { SESSION_DURATION_DAYS, getSessionExpiresAt } from '@/lib/session-id'
+
 export const SESSION_COOKIE_NAME = 'session'
-const SESSION_DURATION_DAYS = 7
 
 function getSecretKey(): Uint8Array {
   const secret = process.env.JWT_SECRET
@@ -17,6 +18,9 @@ function getSecretKey(): Uint8Array {
 export type SessionPayload = {
   userId: number
   email: string
+  // Identificador sin hashear; su hash SHA-256 es lo que está en la tabla `sesiones`.
+  // Los JWT emitidos antes de esa tabla no lo traen, por eso se valida en runtime.
+  sessionId: string
 }
 
 /**
@@ -51,15 +55,12 @@ export async function verifySessionToken(
  */
 export async function createSessionCookie(token: string): Promise<void> {
   const cookieStore = await cookies()
-  const expires = new Date(
-    Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000
-  )
 
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
-    expires,
+    expires: getSessionExpiresAt(new Date()),
     path: '/',
   })
 }

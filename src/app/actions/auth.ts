@@ -7,6 +7,8 @@ import { db } from '@/db'
 import { intentosLogin, usuarios } from '@/db/schema'
 import { getAttemptWindowStart, isRateLimited } from '@/lib/rate-limit'
 import { createSessionToken, createSessionCookie } from '@/lib/session'
+import { generateSessionId } from '@/lib/session-id'
+import { createSessionRecord } from '@/lib/session-store'
 import { getSafeRedirectPath } from '@/lib/safe-redirect'
 
 export type LoginState = {
@@ -94,10 +96,18 @@ export async function loginAction(
   // Un login exitoso reinicia el contador de este email
   await db.delete(intentosLogin).where(eq(intentosLogin.email, email))
 
-  // Credenciales válidas — crear la sesión y redirigir
+  // Credenciales válidas — persistir la sesión (solo su hash), crear el JWT con el
+  // identificador sin hashear y redirigir
+  const sessionId = generateSessionId()
+  await createSessionRecord({
+    usuarioId: user.id,
+    sessionId,
+    now: new Date(),
+  })
   const token = await createSessionToken({
     userId: user.id,
     email: user.email,
+    sessionId,
   })
   await createSessionCookie(token)
 
