@@ -24,15 +24,19 @@ Hecho:
 - **Modelo de datos** (#4, #5): las 6 tablas (`usuarios`, `propiedades`, `ajustes_alquiler`, `impuestos`, `gastos`, `pagos`) con su migración inicial. Seed de datos de prueba en `src/db/seed.ts` (`npm run seed`).
 - **Autenticación** (épica #8, #9–#13):
   - Creación del propietario por CLI: `scripts/create-user.ts` (upsert por email, documentado en el README).
-  - Login: `src/app/login/page.tsx` + `src/components/LoginForm.tsx` → server action `loginAction` en `src/app/actions/auth.ts`, con error genérico "Credenciales inválidas".
-  - Sesión: `src/lib/session.ts`. JWT de 7 días, cookie `httpOnly`, `sameSite: 'strict'`, `secure` solo en producción.
-  - Protección de rutas: `src/proxy.ts`. Solo `/login` es pública. Excluye `api`, `_next/static`, `_next/image` y los archivos de metadata.
-  - Logout: `src/app/actions/logout.ts`. Solo borra la cookie (sesión stateless, sin invalidación del lado del servidor).
+  - Login: `src/app/login/page.tsx` + `src/components/LoginForm.tsx` → server action `loginAction` en `src/app/actions/auth.ts`, con error genérico "Credenciales inválidas". El email se normaliza (`trim` + `toLowerCase`) igual que en `scripts/create-user.ts`. Siempre corre un único `bcrypt.compare()` (contra un hash dummy constante si el usuario no existe) para no revelar por timing qué emails están registrados.
+  - Sesión: `src/lib/session.ts` es la única fuente de verdad (nombre de cookie `SESSION_COOKIE_NAME`, `getSecretKey()` privada, `verifySessionToken()` con `algorithms: ['HS256']` fijo). JWT de 7 días, cookie `httpOnly`, `sameSite: 'strict'`, `secure` solo en producción.
+  - Protección de rutas: `src/proxy.ts` (chequeo optimista, verifica con `verifySessionToken()`, sin `jwtVerify` propio). Solo `/login` es pública. El matcher excluye `api` y `api/*` (no prefijos como `/apiario`), `_next/static`, `_next/image`, metadata e imágenes de `public/`. Al redirigir a `/login` agrega `?from=<ruta original>`.
+  - Ruta original tras login: `loginAction` redirige a `from` solo si pasa `getSafeRedirectPath()` (`src/lib/safe-redirect.ts`: ruta interna parseada con `URL`, contra open redirect); si no, a `/dashboard`.
+  - Revalidación server-side: `src/app/dashboard/layout.tsx` hace `redirect('/login')` si `getSession()` es null; no se confía solo en el proxy.
+  - Logout: `src/app/actions/logout.ts`. Solo borra la cookie (sesión stateless, sin invalidación del lado del servidor; ver #40).
+  - UI: tema claro único (sin `prefers-color-scheme` en `globals.css`) y `lang="es"` en el root layout. `/` redirige a `/dashboard` o `/login` según haya sesión.
 - **Testing** (épica #14, #15–#17): Vitest, Postgres de test en Docker y reseteo con `TRUNCATE` entre tests (`src/test/`).
 
 Pendiente:
 - Lógica de negocio (IPC, mora, rentabilidad neta): cero funciones.
-- ABMs y dashboard real: `/dashboard` es un placeholder, y `/` sigue siendo la landing de `create-next-app`.
+- ABMs y dashboard real: `/dashboard` es un placeholder.
+- Hardening de autenticación (épica #36, reemplaza la deuda técnica #34): hechas #37 (scaffold + redirect) y #38 (timing attack). Pendientes #39 (rate limiting con tabla `intentos_login`, nunca estado en memoria por Vercel serverless) y #40 (invalidación de sesión server-side con tabla `sesiones`).
 - Deuda técnica abierta: #29 (esbuild vulnerable vía drizzle-kit), #32 (separar tests unit/integration).
 
 ## Convenciones del proyecto
@@ -64,7 +68,7 @@ npx drizzle-kit generate   # genera migración a partir del schema
 npx drizzle-kit migrate    # aplica migraciones contra DATABASE_URL
 npx drizzle-kit studio     # explorador visual de la DB
 ```
-Variables de entorno documentadas en `.env.example`. ⚠️ `JWT_SECRET` (obligatoria para login y `src/proxy.ts`) todavía no figura ahí.
+Variables de entorno documentadas en `.env.example`. `JWT_SECRET` (obligatoria para login y `src/proxy.ts`) también figura ahí, con cómo generarla.
 
 ## Roadmap priorizado hacia el MVP
 
