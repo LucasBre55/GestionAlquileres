@@ -7,6 +7,7 @@ import {
   pgTable,
   serial,
   text,
+  timestamp,
 } from 'drizzle-orm/pg-core';
 
 export const estadoPropiedadEnum = pgEnum('estado_propiedad', ['activa', 'inactiva']);
@@ -24,6 +25,15 @@ export const usuarios = pgTable('usuarios', {
   nombre: text('nombre').notNull(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
+});
+
+// Intentos fallidos de login, para el rate limiting (ver src/lib/rate-limit.ts).
+// `email` es el valor normalizado y NO referencia a usuarios: se registra también
+// para emails inexistentes, así el conteo es idéntico exista o no la cuenta.
+export const intentosLogin = pgTable('intentos_login', {
+  id: serial('id').primaryKey(),
+  email: text('email').notNull(),
+  creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const propiedades = pgTable('propiedades', {
