@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import LogoutButton from '@/components/LogoutButton'
 import { getSession } from '@/lib/session'
 
@@ -8,6 +9,11 @@ export default async function DashboardLayout({
 }) {
   const session = await getSession()
 
+  // El proxy es un chequeo optimista: revalidar la sesión cerca de los datos
+  if (!session) {
+    redirect('/login')
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-white border-b border-gray-200 shadow-sm">
@@ -16,9 +22,7 @@ export default async function DashboardLayout({
             Gestión de Alquileres
           </h1>
           <div className="flex items-center gap-4">
-            {session && (
-              <span className="text-sm text-gray-600">{session.email}</span>
-            )}
+            <span className="text-sm text-gray-600">{session.email}</span>
             <LogoutButton />
           </div>
         </div>
