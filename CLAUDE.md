@@ -21,10 +21,11 @@ Software de gestión de alquileres para un propietario en Córdoba, Argentina: a
 ## Estado actual (2026-10-08)
 
 Hecho:
-- **Modelo de datos** (#4, #5): las 6 tablas (`usuarios`, `propiedades`, `ajustes_alquiler`, `impuestos`, `gastos`, `pagos`) con su migración inicial. Seed de datos de prueba en `src/db/seed.ts` (`npm run seed`).
+- **Modelo de datos** (#4, #5): las 6 tablas de negocio (`usuarios`, `propiedades`, `ajustes_alquiler`, `impuestos`, `gastos`, `pagos`) con su migración inicial, más `intentos_login` (rate limiting, migración `0001`). Seed de datos de prueba en `src/db/seed.ts` (`npm run seed`).
 - **Autenticación** (épica #8, #9–#13):
   - Creación del propietario por CLI: `scripts/create-user.ts` (upsert por email, documentado en el README).
   - Login: `src/app/login/page.tsx` + `src/components/LoginForm.tsx` → server action `loginAction` en `src/app/actions/auth.ts`, con error genérico "Credenciales inválidas". El email se normaliza (`trim` + `toLowerCase`) igual que en `scripts/create-user.ts`. Siempre corre un único `bcrypt.compare()` (contra un hash dummy constante si el usuario no existe) para no revelar por timing qué emails están registrados.
+  - Rate limiting (#39): antes de tocar bcrypt, `loginAction` cuenta los fallos del email normalizado en los últimos 15 minutos (tabla `intentos_login`); con 5 o más responde "Demasiados intentos…" sin comparar nada. Cada fallo se registra exista o no el usuario (el conteo es idéntico) y un login exitoso borra los intentos del email. La ventana es lógica pura en `src/lib/rate-limit.ts` (`isRateLimited(attempts, now)`, el "ahora" se inyecta). Estado en la base y no en memoria porque las funciones serverless de Vercel no lo conservan. Trade-off aceptado: quien conozca el email del propietario puede bloquearlo 15 minutos; si se suman usuarios reales, reevaluar con un límite por IP. Sin limpieza automática de filas viejas (mejora futura).
   - Sesión: `src/lib/session.ts` es la única fuente de verdad (nombre de cookie `SESSION_COOKIE_NAME`, `getSecretKey()` privada, `verifySessionToken()` con `algorithms: ['HS256']` fijo). JWT de 7 días, cookie `httpOnly`, `sameSite: 'strict'`, `secure` solo en producción.
   - Protección de rutas: `src/proxy.ts` (chequeo optimista, verifica con `verifySessionToken()`, sin `jwtVerify` propio). Solo `/login` es pública. El matcher excluye `api` y `api/*` (no prefijos como `/apiario`), `_next/static`, `_next/image`, metadata e imágenes de `public/`. Al redirigir a `/login` agrega `?from=<ruta original>`.
   - Ruta original tras login: `loginAction` redirige a `from` solo si pasa `getSafeRedirectPath()` (`src/lib/safe-redirect.ts`: ruta interna parseada con `URL`, contra open redirect); si no, a `/dashboard`.
@@ -36,7 +37,7 @@ Hecho:
 Pendiente:
 - Lógica de negocio (IPC, mora, rentabilidad neta): cero funciones.
 - ABMs y dashboard real: `/dashboard` es un placeholder.
-- Hardening de autenticación (épica #36, reemplaza la deuda técnica #34): hechas #37 (scaffold + redirect) y #38 (timing attack). Pendientes #39 (rate limiting con tabla `intentos_login`, nunca estado en memoria por Vercel serverless) y #40 (invalidación de sesión server-side con tabla `sesiones`).
+- Hardening de autenticación (épica #36, reemplaza la deuda técnica #34): hechas #37 (scaffold + redirect), #38 (timing attack) y #39 (rate limiting). Pendiente #40 (invalidación de sesión server-side con tabla `sesiones`).
 - Deuda técnica abierta: #29 (esbuild vulnerable vía drizzle-kit), #32 (separar tests unit/integration).
 
 ## Convenciones del proyecto
