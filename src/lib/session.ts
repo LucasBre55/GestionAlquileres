@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 
-const SESSION_COOKIE_NAME = 'session'
+export const SESSION_COOKIE_NAME = 'session'
 const SESSION_DURATION_DAYS = 7
 
 function getSecretKey(): Uint8Array {
@@ -40,7 +40,9 @@ export async function createSessionToken(
 export async function verifySessionToken(
   token: string
 ): Promise<SessionPayload> {
-  const { payload } = await jwtVerify(token, getSecretKey())
+  const { payload } = await jwtVerify(token, getSecretKey(), {
+    algorithms: ['HS256'],
+  })
   return payload as unknown as SessionPayload
 }
 
