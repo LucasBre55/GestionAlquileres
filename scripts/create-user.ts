@@ -1,6 +1,6 @@
 import { hash } from 'bcryptjs';
-import { eq } from 'drizzle-orm';
-import { usuarios } from '../src/db/schema';
+import { and, eq, isNull } from 'drizzle-orm';
+import { sesiones, usuarios } from '../src/db/schema';
 
 const BCRYPT_ROUNDS = 12;
 const MIN_PASSWORD_LENGTH = 8;
@@ -196,7 +196,15 @@ async function main() {
       .set({ passwordHash })
       .where(eq(usuarios.id, usuarioExistente.id));
 
+    // Resetear la contraseña cierra también las sesiones abiertas en otros
+    // dispositivos: se revocan todas las que sigan activas.
+    await db
+      .update(sesiones)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(sesiones.usuarioId, usuarioExistente.id), isNull(sesiones.revokedAt)));
+
     console.log(`✔ Contraseña actualizada para el usuario existente: ${email}`);
+    console.log('✔ Sesiones activas revocadas.');
   } else {
     await db.insert(usuarios).values({ nombre, email, passwordHash });
 

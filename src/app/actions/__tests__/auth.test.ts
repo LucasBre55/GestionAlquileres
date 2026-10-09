@@ -4,7 +4,10 @@ const mocks = vi.hoisted(() => ({
   findUsers: vi.fn(),
   findAttempts: vi.fn(),
   insertAttempt: vi.fn(),
+  insertSession: vi.fn(),
   deleteAttempts: vi.fn(),
+  createSessionToken: vi.fn(),
+  createSessionCookie: vi.fn(),
   compare: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`)
@@ -12,17 +15,19 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/db', async () => {
-  const { intentosLogin } = await import('@/db/schema')
+  const { intentosLogin, sesiones } = await import('@/db/schema')
   return {
     db: {
-      // La acción lee dos tablas con la misma forma: se distinguen por tabla
+      // La acción lee y escribe tablas con la misma forma: se distinguen por tabla
       select: () => ({
         from: (table: unknown) => ({
           where: () =>
             table === intentosLogin ? mocks.findAttempts() : mocks.findUsers(),
         }),
       }),
-      insert: () => ({ values: mocks.insertAttempt }),
+      insert: (table: unknown) => ({
+        values: table === sesiones ? mocks.insertSession : mocks.insertAttempt,
+      }),
       delete: () => ({ where: mocks.deleteAttempts }),
     },
   }
@@ -33,11 +38,12 @@ vi.mock('bcryptjs', async (importOriginal) => ({
 }))
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }))
 vi.mock('@/lib/session', () => ({
-  createSessionToken: vi.fn().mockResolvedValue('token'),
-  createSessionCookie: vi.fn().mockResolvedValue(undefined),
+  createSessionToken: mocks.createSessionToken,
+  createSessionCookie: mocks.createSessionCookie,
 }))
 
 import { loginAction } from '@/app/actions/auth'
+import { hashSessionId } from '@/lib/session-id'
 
 const USER_HASH = '$2b$12$userhashuserhashuserhashuserhashuserhashuserhashuserha'
 const initialState = { success: false, error: '' }
@@ -63,6 +69,8 @@ const recentAttempts = (count: number) =>
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.findAttempts.mockResolvedValue([])
+  mocks.createSessionToken.mockResolvedValue('token')
+  mocks.createSessionCookie.mockResolvedValue(undefined)
 })
 
 describe('loginAction timing-attack mitigation', () => {
@@ -222,5 +230,80 @@ describe('loginAction rate limiting', () => {
     await loginAction(initialState, loginForm('dueno@example.com', 'incorrecta'))
 
     expect(mocks.deleteAttempts).not.toHaveBeenCalled()
+  })
+})
+
+describe('loginAction session persistence', () => {
+  async function successfulLogin() {
+    mocks.findUsers.mockResolvedValue([existingUser])
+    mocks.compare.mockResolvedValue(true)
+    await expect(
+      loginAction(initialState, loginForm('dueno@example.com', 'correcta'))
+    ).rejects.toThrow('NEXT_REDIRECT:/dashboard')
+  }
+
+  it('puts a random session id in the JWT payload', async () => {
+    await successfulLogin()
+
+    expect(mocks.createSessionToken).toHaveBeenCalledTimes(1)
+    const [payload] = mocks.createSessionToken.mock.calls[0]
+    expect(payload).toMatchObject({ userId: 1, email: 'dueno@example.com' })
+    expect(payload.sessionId).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('inserts a session row with the SHA-256 hash of the id, never the id itself', async () => {
+    await successfulLogin()
+
+    const [{ sessionId }] = mocks.createSessionToken.mock.calls[0]
+    expect(mocks.insertSession).toHaveBeenCalledTimes(1)
+    const [row] = mocks.insertSession.mock.calls[0]
+    expect(row.usuarioId).toBe(1)
+    expect(row.tokenHash).toBe(hashSessionId(sessionId))
+    expect(row.revokedAt).toBeNull()
+    expect(JSON.stringify(row)).not.toContain(sessionId)
+  })
+
+  it('stores created_at = now and expires_at = now + 7 days', async () => {
+    await successfulLogin()
+
+    const [row] = mocks.insertSession.mock.calls[0]
+    expect(row.createdAt).toBeInstanceOf(Date)
+    expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(
+      7 * 24 * 60 * 60 * 1000
+    )
+  })
+
+  it('persists the session before setting the cookie', async () => {
+    await successfulLogin()
+
+    expect(mocks.insertSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createSessionCookie.mock.invocationCallOrder[0]
+    )
+  })
+
+  it('issues a different session id on every login', async () => {
+    await successfulLogin()
+    await successfulLogin()
+
+    const ids = mocks.createSessionToken.mock.calls.map(([p]) => p.sessionId)
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('does not create a session when the login fails', async () => {
+    mocks.findUsers.mockResolvedValue([existingUser])
+    mocks.compare.mockResolvedValue(false)
+
+    await loginAction(initialState, loginForm('dueno@example.com', 'incorrecta'))
+
+    expect(mocks.insertSession).not.toHaveBeenCalled()
+    expect(mocks.createSessionToken).not.toHaveBeenCalled()
+  })
+
+  it('does not create a session when rate limited', async () => {
+    mocks.findAttempts.mockResolvedValue(recentAttempts(5))
+
+    await loginAction(initialState, loginForm('dueno@example.com', 'correcta'))
+
+    expect(mocks.insertSession).not.toHaveBeenCalled()
   })
 })

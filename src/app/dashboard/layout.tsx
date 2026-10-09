@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import LogoutButton from '@/components/LogoutButton'
 import { getSession } from '@/lib/session'
+import { isSessionActive } from '@/lib/session-store'
 
 export default async function DashboardLayout({
   children,
@@ -9,9 +10,12 @@ export default async function DashboardLayout({
 }) {
   const session = await getSession()
 
-  // El proxy es un chequeo optimista: revalidar la sesión cerca de los datos
-  if (!session) {
-    redirect('/login')
+  // El proxy es un chequeo optimista (solo firma y expiración del JWT): revalidar la
+  // sesión cerca de los datos, confirmando que siga en la base sin revocar ni expirar.
+  // Se redirige a una ruta que borra la cookie y luego manda a /login: con la firma
+  // todavía válida, el proxy mandaría /login -> /dashboard y quedaría un loop.
+  if (!session || !(await isSessionActive(session.sessionId))) {
+    redirect('/api/session/expired')
   }
 
   return (
