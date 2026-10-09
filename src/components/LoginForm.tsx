@@ -8,11 +8,13 @@ const initialState: LoginState = {
   error: '',
 }
 
-export default function LoginForm() {
+export default function LoginForm({ from }: { from?: string }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState)
 
   return (
     <form action={formAction} className="space-y-5">
+      {/* Ruta original; loginAction la valida antes de redirigir */}
+      {from && <input type="hidden" name="from" value={from} />}
       {/* Email */}
       <div>
         <label

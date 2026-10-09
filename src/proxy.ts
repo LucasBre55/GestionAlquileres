@@ -29,7 +29,12 @@ export async function proxy(request: NextRequest) {
 
   // Usuario no autenticado intentando acceder a ruta privada → redirigir a /login
   if (!isAuthenticated && !isPublicRoute) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    const loginUrl = new URL('/login', request.url)
+    // Recordar la ruta original para volver tras el login (se valida en loginAction)
+    if (pathname !== '/') {
+      loginUrl.searchParams.set('from', pathname + request.nextUrl.search)
+    }
+    return NextResponse.redirect(loginUrl)
   }
 
   return NextResponse.next()
