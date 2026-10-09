@@ -15,6 +15,14 @@ export type LoginState = {
 
 const INVALID_CREDENTIALS_MSG = 'Credenciales inválidas'
 
+// Fixed, non-secret bcrypt hash (12 rounds, same cost as scripts/create-user.ts).
+// It is never compared against a real password: it only exists so that
+// bcrypt.compare() costs the same when the user does not exist. Hardcoded to
+// avoid ~250ms of hashSync() on every cold start. Generated with:
+//   node -e "console.log(require('bcryptjs').hashSync('dummy-password-never-used', 12))"
+const DUMMY_PASSWORD_HASH =
+  '$2b$12$XJ7Z/.1CMe4LPFml66aEvu4VilH58vsPf8SG677oiLKrK0uc5W8i6'
+
 export async function loginAction(
   _prevState: LoginState,
   formData: FormData
@@ -41,16 +49,15 @@ export async function loginAction(
     .from(usuarios)
     .where(eq(usuarios.email, email))
 
-  if (!user) {
-    // User not found — return the SAME generic error
-    return { success: false, error: INVALID_CREDENTIALS_MSG }
-  }
+  // Always run exactly one bcrypt compare, against a dummy hash when the user
+  // does not exist, so response time does not reveal whether the email is registered
+  const passwordMatch = await compare(
+    password,
+    user?.passwordHash ?? DUMMY_PASSWORD_HASH
+  )
 
-  // Compare submitted password against the stored hash
-  const passwordMatch = await compare(password, user.passwordHash)
-
-  if (!passwordMatch) {
-    // Wrong password — return the SAME generic error
+  if (!user || !passwordMatch) {
+    // User not found or wrong password — return the SAME generic error
     return { success: false, error: INVALID_CREDENTIALS_MSG }
   }
 
