@@ -12,13 +12,14 @@ Software de gestión de alquileres para un propietario en Córdoba, Argentina: a
   - ⚠️ Next 16 puede tener breaking changes vs. conocimiento previo del modelo — ver `AGENTS.md` en la raíz: leer `node_modules/next/dist/docs/` antes de escribir código nuevo relacionado a Next.
   - En Next 16 `middleware` pasó a llamarse `proxy`: la protección de rutas vive en `src/proxy.ts`.
 - **Estilos:** Tailwind CSS 4 (vía `@tailwindcss/postcss`), sin librería de componentes.
-- **Base de datos:** PostgreSQL 16 gestionado por Neon (`@neondatabase/serverless`, driver HTTP).
+- **Base de datos:** PostgreSQL 16 gestionado por Neon (`@neondatabase/serverless`). Dos clientes: `db` en `src/db/index.ts` (`neon-http`, sin transacciones, el de las lecturas y los UPDATE de una sola sentencia) y `withTransaction()` en `src/db/transaction.ts` (`neon-serverless` por WebSocket, abre y cierra un `Pool` por llamada, para operaciones de varias sentencias). Ambos se pasan a la lógica de negocio como `DbExecutor` (`src/db/executor.ts`).
+- **Validación:** `zod` 4. Ojo: `.omit()`/`.pick()` lanzan sobre un objeto con refinamientos; derivar de un objeto base sin refinar.
 - **ORM:** Drizzle ORM 0.45 + drizzle-kit 0.31. Schema en `src/db/schema.ts`, migraciones en `drizzle/`, config en `drizzle.config.ts`.
 - **Storage de archivos:** Vercel Blob (spec §3), modo privado, para el contrato en PDF de cada propiedad. Helpers en `src/lib/blob.ts` (todavía sin uso desde la UI).
 - **Auth:** propia, sin librería de auth. Password con `bcryptjs` (12 rondas), sesión como JWT HS256 firmado con `jose` (`JWT_SECRET`) en cookie `session`.
 - **Testing:** Vitest 5. Los tests de integración usan un Postgres 16 local vía `docker-compose.test.yml` (`pg` + `drizzle-orm/node-postgres`), nunca Neon.
 
-## Estado actual (2026-10-08)
+## Estado actual (2026-11-01)
 
 Hecho:
 - **Modelo de datos** (#4, #5): las 6 tablas de negocio (`usuarios`, `propiedades`, `ajustes_alquiler`, `impuestos`, `gastos`, `pagos`) con su migración inicial, más `intentos_login` (rate limiting, migración `0001`) y `sesiones` (invalidación de sesión, migración `0002`). Seed de datos de prueba en `src/db/seed.ts` (`npm run seed`).
@@ -35,22 +36,32 @@ Hecho:
   - Reseteo de contraseña: `scripts/create-user.ts` revoca todas las sesiones activas del usuario (sin test, es un script interactivo).
   - UI: tema claro único (sin `prefers-color-scheme` en `globals.css`) y `lang="es"` en el root layout. `/` redirige a `/dashboard` o `/login` según haya sesión.
 - **Testing** (épica #14, #15–#17): Vitest, Postgres de test en Docker y reseteo con `TRUNCATE` entre tests (`src/test/`).
+- **ABM de Propiedades** (épica #45), solo la capa de servidor por ahora:
+  - Cliente transaccional (#46): `withTransaction()` en `src/db/transaction.ts` y el tipo `DbExecutor`.
+  - Crear (#47): `crearPropiedadAction` en `src/app/actions/propiedades.ts` → `crearPropiedad(tx, propietarioId, datos)` en `src/lib/crear-propiedad.ts`. Inserta la propiedad y su primer `ajustes_alquiler` (monto inicial, vigente desde el inicio del contrato) en una transacción.
+  - Editar (#48, rama `feature/48-editar-propiedad`, PR pendiente): `editarPropiedadAction` → `editarPropiedad(executor, propietarioId, propiedadId, datos)` en `src/lib/editar-propiedad.ts`. Solo edita `inquilino_actual`, `contacto_inquilino`, `direccion`, `fecha_fin_contrato` y `frecuencia_aumento`; `monto_inicial` y `fecha_inicio_contrato` quedan fijos (son el punto de partida del historial de ajustes), y estado y contrato tienen sus propias acciones. Un único UPDATE con `CASE` mueve el inquilino viejo a `inquilino_anterior` solo si había uno y cambia (vaciar la propiedad conserva el anterior que hubiera). Valida `fecha_fin > fecha_inicio` contra la fecha de inicio **guardada** (el formulario no la envía). Propiedad ajena e inexistente devuelven el mismo resultado (`no_encontrada`).
+  - Esquemas en `src/lib/propiedad-schema.ts`, sin imports de servidor para que los reuse la UI: objeto base sin refinar, `crearPropiedadSchema` (con el refinamiento fin > inicio), `editarPropiedadSchema` (sin monto ni fecha de inicio, sin refinamiento) y `propiedadIdSchema`. Cada acción tiene su whitelist de campos (`CAMPOS_PROPIEDAD`, `CAMPOS_EDITAR_PROPIEDAD`): el resto del FormData se ignora.
+  - `editarPropiedad` se verificó además contra Neon real con el cliente `neon-http` (traspaso A→B→null→C y ownership), con un script temporal que ya no está en el repo.
+  - Cada server action empieza con `requireSession()` (`src/lib/require-session.ts`: JWT + `isSessionActive()`, redirige a `/api/session/expired`); el `propietario_id` sale siempre de la sesión, nunca del FormData.
 
 Pendiente:
 - Lógica de negocio (IPC, mora, rentabilidad neta): cero funciones.
-- ABMs y dashboard real: `/dashboard` es un placeholder.
+- ABM de Propiedades: faltan #49 (cambiar estado y eliminar) y la UI #50 (listado), #51 (formulario de alta y edición), #52 (detalle y subida de contrato). El resto de los ABMs (impuestos, gastos, pagos) y el dashboard real no empezaron: `/dashboard` es un placeholder.
 - Hardening de autenticación (épica #36, reemplaza la deuda técnica #34): hechas #37 (scaffold + redirect), #38 (timing attack), #39 (rate limiting) y #40 (invalidación de sesión server-side). Pendiente: la verificación manual del flujo completo en un navegador (login, logout, reseteo de contraseña y el redirect de sesión revocada), que solo está cubierto por tests y el build. Al desplegar, aplicar las migraciones a Neon (`npx drizzle-kit migrate`) y volver a iniciar sesión una vez.
 - Deuda técnica abierta: #29 (esbuild vulnerable vía drizzle-kit), #32 (separar tests unit/integration).
 
 ## Convenciones del proyecto
 
-Con tan poco código propio, no hay convenciones "descubiertas" todavía — las que siguen son las que trae el scaffold y deberían mantenerse:
+Las primeras convenciones vienen del scaffold; las de lógica de negocio y server actions se fueron fijando con el ABM de Propiedades y deberían mantenerse:
 
 - Alias de imports: `@/*` → `./src/*` (ver `tsconfig.json`).
 - App Router: código de rutas en `src/app/**`, cada ruta con su carpeta (`page.tsx`, `layout.tsx`).
 - DB: cliente Drizzle centralizado en `src/db/index.ts` (patrón a extender, no duplicar conexiones).
 - Lint: `eslint-config-next` (core-web-vitals + typescript). Correr `npm run lint` antes de commitear.
-- Sin convención de nombres de carpetas para modelos/lógica de negocio todavía — a definir en el primer PR de modelo de datos (sugerido: `src/db/schema.ts` o `src/db/schema/*.ts`, `src/lib/` para lógica de cálculo).
+- Server actions en dos capas: la action (`src/app/actions/*.ts`) hace `requireSession()`, lee solo los campos de su whitelist, valida con zod **antes** de tocar la base y devuelve `{ success, errors }` por campo (compatible con `useActionState`, sin `redirect` ni `revalidatePath`); la lógica vive en `src/lib/` y recibe un `DbExecutor` como parámetro, sin abrir transacciones ella misma.
+- Tests de integración (`*.integration.test.ts`) contra el Postgres de test. Las actions importan `db` (Neon) al cargarse, que falla sin `DATABASE_URL`: mockear `@/db` apuntando a `testDb` (`src/db/test-client.ts`).
+- Fechas ISO (`YYYY-MM-DD`) se comparan como string, nunca con `Date` (corre el día según la zona horaria); montos como string, sin `parseFloat`.
+- Mensajes de error de validación y textos de UI en español neutro; código e identificadores de lógica en español (`crearPropiedad`, `fechaFinContrato`), como el resto del dominio.
 
 ## Comandos
 
