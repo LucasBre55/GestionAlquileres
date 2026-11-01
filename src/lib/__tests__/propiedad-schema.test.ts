@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { crearPropiedadSchema } from '@/lib/propiedad-schema'
+import {
+  CAMPOS_EDITAR_PROPIEDAD,
+  crearPropiedadSchema,
+  editarPropiedadSchema,
+  propiedadIdSchema,
+} from '@/lib/propiedad-schema'
 
 const valid = {
   inquilinoActual: 'Juan Pérez',
@@ -174,4 +179,87 @@ describe('crearPropiedadSchema', () => {
     expect(result.success).toBe(true)
     expect(result.data).not.toHaveProperty('propietarioId')
   })
+})
+
+describe('editarPropiedadSchema', () => {
+  const validEdit = {
+    inquilinoActual: 'Ana Gómez',
+    contactoInquilino: 'ana@example.com',
+    direccion: 'Calle 1',
+    fechaFinContrato: '2029-03-01',
+    frecuenciaAumento: '6',
+  }
+
+  function parseEdit(overrides: Record<string, unknown> = {}) {
+    return editarPropiedadSchema.safeParse({ ...validEdit, ...overrides })
+  }
+
+  it('whitelists exactly the editable fields', () => {
+    expect([...CAMPOS_EDITAR_PROPIEDAD].sort()).toEqual([
+      'contactoInquilino',
+      'direccion',
+      'fechaFinContrato',
+      'frecuenciaAumento',
+      'inquilinoActual',
+    ])
+  })
+
+  it('accepts a complete valid input without montoInicial or fechaInicioContrato', () => {
+    const result = parseEdit()
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual({
+      inquilinoActual: 'Ana Gómez',
+      contactoInquilino: 'ana@example.com',
+      direccion: 'Calle 1',
+      fechaFinContrato: '2029-03-01',
+      frecuenciaAumento: 6,
+    })
+  })
+
+  it('strips the immutable and server-owned fields instead of passing them through', () => {
+    const result = parseEdit({
+      montoInicial: '1',
+      fechaInicioContrato: '2000-01-01',
+      montoActual: '1',
+      deudaAcumulada: '1',
+      estado: 'inactiva',
+      contratoPdfUrl: 'x',
+      propietarioId: '9',
+    })
+    expect(result.success).toBe(true)
+    expect(Object.keys(result.data!).sort()).toEqual([...CAMPOS_EDITAR_PROPIEDAD].sort())
+  })
+
+  it('does not enforce end > start: the start date is not part of the form', () => {
+    // The persisted start date is checked by the logic layer, not by this schema
+    expect(parseEdit({ fechaFinContrato: '1999-01-01' }).success).toBe(true)
+  })
+
+  it('reuses the field rules of the create schema', () => {
+    const result = parseEdit({ direccion: '  ', fechaFinContrato: '2026-02-30', frecuenciaAumento: '0' })
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(Object.keys(z.flattenError(result.error).fieldErrors).sort()).toEqual([
+      'direccion',
+      'fechaFinContrato',
+      'frecuenciaAumento',
+    ])
+  })
+})
+
+describe('propiedadIdSchema', () => {
+  it.each([
+    ['1', 1],
+    ['42', 42],
+    [' 7 ', 7],
+  ])('accepts %j', (input, expected) => {
+    expect(propiedadIdSchema.parse(input)).toBe(expected)
+  })
+
+  it.each(['0', '-1', '1.5', '1e3', 'abc', '', '99999999999', null, undefined])(
+    'rejects %j',
+    (input) => {
+      expect(propiedadIdSchema.safeParse(input).success).toBe(false)
+    }
+  )
 })

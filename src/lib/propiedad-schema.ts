@@ -78,22 +78,61 @@ export const CAMPOS_PROPIEDAD = [
   'frecuenciaAumento',
 ] as const
 
-export const crearPropiedadSchema = z
-  .object({
-    inquilinoActual: textoOpcional('El nombre del inquilino', MAX_TEXTO_OPCIONAL),
-    contactoInquilino: textoOpcional('El contacto del inquilino', MAX_TEXTO_OPCIONAL),
-    direccion: textoObligatorio('La dirección', MAX_DIRECCION),
-    montoInicial: monto,
-    fechaInicioContrato: fecha('La fecha de inicio del contrato'),
-    fechaFinContrato: fecha('La fecha de fin del contrato'),
-    frecuenciaAumento,
-  })
-  // Las fechas ISO (YYYY-MM-DD) se ordenan igual como string que como fecha, sin pasar
-  // por Date (que correría el día según la zona horaria).
-  .refine((datos) => datos.fechaFinContrato > datos.fechaInicioContrato, {
-    path: ['fechaFinContrato'],
-    error: 'La fecha de fin debe ser posterior a la fecha de inicio',
-  })
+// Objeto base sin refinamientos: zod 4 no permite `.omit()` sobre un objeto refinado,
+// así que el esquema de edición se deriva de acá y no de `crearPropiedadSchema`.
+const propiedadBaseSchema = z.object({
+  inquilinoActual: textoOpcional('El nombre del inquilino', MAX_TEXTO_OPCIONAL),
+  contactoInquilino: textoOpcional('El contacto del inquilino', MAX_TEXTO_OPCIONAL),
+  direccion: textoObligatorio('La dirección', MAX_DIRECCION),
+  montoInicial: monto,
+  fechaInicioContrato: fecha('La fecha de inicio del contrato'),
+  fechaFinContrato: fecha('La fecha de fin del contrato'),
+  frecuenciaAumento,
+})
+
+// Las fechas ISO (YYYY-MM-DD) se ordenan igual como string que como fecha, sin pasar
+// por Date (que correría el día según la zona horaria).
+export const MENSAJE_FIN_POSTERIOR_A_INICIO = 'La fecha de fin debe ser posterior a la fecha de inicio'
+
+export const crearPropiedadSchema = propiedadBaseSchema.refine(
+  (datos) => datos.fechaFinContrato > datos.fechaInicioContrato,
+  { path: ['fechaFinContrato'], error: MENSAJE_FIN_POSTERIOR_A_INICIO }
+)
+
+// Whitelist de la edición: monto inicial y fecha de inicio quedan fijos (son el punto de
+// partida del historial de ajustes), y estado/contrato tienen sus propias acciones.
+export const CAMPOS_EDITAR_PROPIEDAD = [
+  'inquilinoActual',
+  'contactoInquilino',
+  'direccion',
+  'fechaFinContrato',
+  'frecuenciaAumento',
+] as const
+
+// Sin el refinamiento fin > inicio: la fecha de inicio no está en el formulario de
+// edición, la compara la capa de lógica contra el valor guardado.
+export const editarPropiedadSchema = propiedadBaseSchema.omit({
+  montoInicial: true,
+  fechaInicioContrato: true,
+})
+
+export const propiedadIdSchema = z
+  .string({ error: 'La propiedad es obligatoria' })
+  .trim()
+  .regex(/^\d+$/, { error: 'La propiedad no es válida' })
+  .transform(Number)
+  .pipe(
+    z
+      .number()
+      .int()
+      .positive({ error: 'La propiedad no es válida' })
+      // serial = int4: un id mayor ni siquiera puede existir
+      .max(2_147_483_647, { error: 'La propiedad no es válida' })
+  )
 
 export type PropiedadInput = z.output<typeof crearPropiedadSchema>
 export type PropiedadErrors = Partial<Record<(typeof CAMPOS_PROPIEDAD)[number], string[]>>
+export type EditarPropiedadInput = z.output<typeof editarPropiedadSchema>
+export type EditarPropiedadErrors = Partial<
+  Record<(typeof CAMPOS_EDITAR_PROPIEDAD)[number] | 'propiedadId', string[]>
+>

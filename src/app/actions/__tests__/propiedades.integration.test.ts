@@ -13,6 +13,8 @@ vi.mock('next/navigation', () => ({ redirect: mocks.redirect }))
 vi.mock('@/lib/session', () => ({ getSession: mocks.getSession }))
 vi.mock('@/lib/session-store', () => ({ isSessionActive: mocks.isSessionActive }))
 vi.mock('@/db/transaction', () => ({ withTransaction: mocks.withTransaction }))
+// The actions module also imports the Neon HTTP client, which needs DATABASE_URL on load
+vi.mock('@/db', async () => ({ db: (await import('@/db/test-client')).testDb }))
 
 import { crearPropiedadAction } from '@/app/actions/propiedades'
 import { ajustesAlquiler, propiedades, usuarios } from '@/db/schema'
