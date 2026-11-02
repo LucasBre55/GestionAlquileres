@@ -130,9 +130,25 @@ export const propiedadIdSchema = z
       .max(2_147_483_647, { error: 'La propiedad no es válida' })
   )
 
+// Espejo de `estado_propiedad` (pgEnum en src/db/schema.ts). Este archivo no puede
+// importar el schema de la base (tiene que seguir siendo importable desde el cliente);
+// un test compara ambas listas para que no diverjan.
+export const ESTADOS_PROPIEDAD = ['activa', 'inactiva'] as const
+
+export const CAMPOS_CAMBIAR_ESTADO = ['propiedadId', 'estado'] as const
+
+export const cambiarEstadoSchema = z.object({
+  propiedadId: propiedadIdSchema,
+  estado: z.enum(ESTADOS_PROPIEDAD, { error: 'El estado no es válido' }),
+})
+
+export type EstadoPropiedad = (typeof ESTADOS_PROPIEDAD)[number]
 export type PropiedadInput = z.output<typeof crearPropiedadSchema>
 export type PropiedadErrors = Partial<Record<(typeof CAMPOS_PROPIEDAD)[number], string[]>>
 export type EditarPropiedadInput = z.output<typeof editarPropiedadSchema>
 export type EditarPropiedadErrors = Partial<
   Record<(typeof CAMPOS_EDITAR_PROPIEDAD)[number] | 'propiedadId', string[]>
 >
+export type CambiarEstadoErrors = Partial<Record<(typeof CAMPOS_CAMBIAR_ESTADO)[number], string[]>>
+// `general` es para fallos de infraestructura (Blob, base) que no son culpa de ningún campo
+export type EliminarPropiedadErrors = Partial<Record<'propiedadId' | 'general', string[]>>

@@ -4,17 +4,28 @@ import { z } from 'zod'
 import { db } from '@/db'
 import { withTransaction } from '@/db/transaction'
 import { crearPropiedad } from '@/lib/crear-propiedad'
+import { cambiarEstadoPropiedad } from '@/lib/cambiar-estado-propiedad'
 import { editarPropiedad } from '@/lib/editar-propiedad'
+import { eliminarPropiedad } from '@/lib/eliminar-propiedad'
 import {
+  cambiarEstadoSchema,
+  CAMPOS_CAMBIAR_ESTADO,
   CAMPOS_EDITAR_PROPIEDAD,
   CAMPOS_PROPIEDAD,
   crearPropiedadSchema,
   editarPropiedadSchema,
   propiedadIdSchema,
+  type CambiarEstadoErrors,
   type EditarPropiedadErrors,
+  type EliminarPropiedadErrors,
   type PropiedadErrors,
 } from '@/lib/propiedad-schema'
 import { requireSession } from '@/lib/require-session'
+
+// Misma respuesta para una propiedad ajena y para una inexistente: no se revela cuál
+const PROPIEDAD_NO_EXISTE = 'La propiedad no existe'
+const ERROR_GENERAL_ELIMINAR =
+  'No se pudo eliminar la propiedad. Reintentá en unos instantes.'
 
 export type PropiedadState =
   | { success: true; id: number }
@@ -87,6 +98,76 @@ export async function editarPropiedadAction(
       return { success: false, errors: resultado.errors }
     case 'no_encontrada':
       // Misma respuesta si no existe o es de otro propietario
-      return { success: false, errors: { propiedadId: ['La propiedad no existe'] } }
+      return { success: false, errors: { propiedadId: [PROPIEDAD_NO_EXISTE] } }
   }
+}
+
+export type CambiarEstadoState =
+  | { success: true }
+  | { success: false; errors: CambiarEstadoErrors }
+
+export async function cambiarEstadoPropiedadAction(
+  _prevState: CambiarEstadoState,
+  formData: FormData
+): Promise<CambiarEstadoState> {
+  const session = await requireSession()
+
+  // Whitelist explícita: solo propiedadId y estado; el dueño sale de la sesión
+  const raw = Object.fromEntries(
+    CAMPOS_CAMBIAR_ESTADO.map((campo) => [campo, formData.get(campo) ?? undefined])
+  )
+  const parsed = cambiarEstadoSchema.safeParse(raw)
+  if (!parsed.success) {
+    return { success: false, errors: z.flattenError(parsed.error).fieldErrors }
+  }
+
+  const resultado = await cambiarEstadoPropiedad(
+    db,
+    session.userId,
+    parsed.data.propiedadId,
+    parsed.data.estado
+  )
+
+  if (resultado.status === 'no_encontrada') {
+    return { success: false, errors: { propiedadId: [PROPIEDAD_NO_EXISTE] } }
+  }
+
+  // Sin redirect ni revalidatePath: la UI decide qué pasa después
+  return { success: true }
+}
+
+export type EliminarPropiedadState =
+  | { success: true }
+  | { success: false; errors: EliminarPropiedadErrors }
+
+// Sin confirmación acá: pedirla antes de invocar esta acción es responsabilidad de la UI.
+export async function eliminarPropiedadAction(
+  _prevState: EliminarPropiedadState,
+  formData: FormData
+): Promise<EliminarPropiedadState> {
+  const session = await requireSession()
+
+  const propiedadId = propiedadIdSchema.safeParse(formData.get('propiedadId'))
+  if (!propiedadId.success) {
+    return { success: false, errors: { propiedadId: z.flattenError(propiedadId.error).formErrors } }
+  }
+
+  try {
+    const resultado = await eliminarPropiedad(db, session.userId, propiedadId.data)
+    if (resultado.status === 'no_encontrada') {
+      return { success: false, errors: { propiedadId: [PROPIEDAD_NO_EXISTE] } }
+    }
+  } catch (error) {
+    // Solo la clase y el mensaje: nunca el token de Blob ni nada de process.env. El nombre
+    // sale del constructor porque los errores de @vercel/blob dejan `name` en "Error".
+    console.error(
+      'eliminarPropiedadAction falló:',
+      error instanceof Error ? error.constructor.name : typeof error,
+      error instanceof Error ? error.message : ''
+    )
+    return { success: false, errors: { general: [ERROR_GENERAL_ELIMINAR] } }
+  }
+
+  // Sin redirect ni revalidatePath: la UI decide qué pasa después
+  return { success: true }
 }

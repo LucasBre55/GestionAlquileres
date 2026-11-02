@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { estadoPropiedadEnum } from '@/db/schema'
 import {
+  cambiarEstadoSchema,
+  CAMPOS_CAMBIAR_ESTADO,
   CAMPOS_EDITAR_PROPIEDAD,
   crearPropiedadSchema,
   editarPropiedadSchema,
+  ESTADOS_PROPIEDAD,
   propiedadIdSchema,
 } from '@/lib/propiedad-schema'
 
@@ -262,4 +266,59 @@ describe('propiedadIdSchema', () => {
       expect(propiedadIdSchema.safeParse(input).success).toBe(false)
     }
   )
+})
+
+describe('ESTADOS_PROPIEDAD', () => {
+  // The schema file cannot import @/db/schema (it must stay importable from the client),
+  // so this test is what keeps both lists from diverging.
+  it('matches the values of the estado_propiedad pgEnum, in the same order', () => {
+    expect([...ESTADOS_PROPIEDAD]).toEqual([...estadoPropiedadEnum.enumValues])
+  })
+})
+
+describe('cambiarEstadoSchema', () => {
+  it('whitelists exactly propiedadId and estado', () => {
+    expect([...CAMPOS_CAMBIAR_ESTADO].sort()).toEqual(['estado', 'propiedadId'])
+  })
+
+  it.each([
+    ['activa', 'activa'],
+    ['inactiva', 'inactiva'],
+  ])('accepts the estado %s', (input, expected) => {
+    const result = cambiarEstadoSchema.safeParse({ propiedadId: '3', estado: input })
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual({ propiedadId: 3, estado: expected })
+  })
+
+  it.each(['', 'ACTIVA', 'Activa', ' activa', 'borrada', 'true', '1'])(
+    'rejects the estado %j, reporting it on estado',
+    (input) => {
+      const result = cambiarEstadoSchema.safeParse({ propiedadId: '3', estado: input })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(Object.keys(z.flattenError(result.error).fieldErrors)).toEqual(['estado'])
+    }
+  )
+
+  it('rejects a missing estado', () => {
+    const result = cambiarEstadoSchema.safeParse({ propiedadId: '3' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects an invalid propiedadId, reporting it on propiedadId', () => {
+    const result = cambiarEstadoSchema.safeParse({ propiedadId: '0', estado: 'activa' })
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(Object.keys(z.flattenError(result.error).fieldErrors)).toEqual(['propiedadId'])
+  })
+
+  it('strips unknown keys such as propietarioId', () => {
+    const result = cambiarEstadoSchema.safeParse({
+      propiedadId: '3',
+      estado: 'activa',
+      propietarioId: '9',
+      direccion: 'x',
+    })
+    expect(result.data).toEqual({ propiedadId: 3, estado: 'activa' })
+  })
 })
